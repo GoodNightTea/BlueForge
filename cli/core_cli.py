@@ -1,21 +1,20 @@
-#!/usr/bin/env python3
-# cli/blueforge_cli.py
+# cli/core_cli.py
 import asyncio
 import sys
 import os
-import argparse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cli.session import BlueForgeSession
-from cli.ui import BlueForgeColors, DisplayManager, PromptManager
+from cli.ui.colors import BlueForgeColors
+from cli.ui.display import DisplayManager
 from cli.commands import (
     DiscoveryCommands, AnalysisCommands, ResearchCommands, 
     AdvancedCommands, DebugCommands
 )
-from utils.logging import get_logger, set_log_level
+from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -27,7 +26,6 @@ class BlueForgeInteractiveCLI:
         self.running = True
         self.colors = BlueForgeColors()
         self.display = DisplayManager(self.colors)
-        self.prompts = PromptManager(self.colors)
         
         # Initialize command modules
         self.discovery = DiscoveryCommands(self.session, self.colors)
@@ -99,11 +97,19 @@ class BlueForgeInteractiveCLI:
             'status': self._cmd_status,
         })
         
-        # Add commands from modules
+        # Discovery commands
         commands.update(self.discovery.get_commands())
+        
+        # Analysis commands  
         commands.update(self.analysis.get_commands())
+        
+        # Research commands
         commands.update(self.research.get_commands())
+        
+        # Advanced commands
         commands.update(self.advanced.get_commands())
+        
+        # Debug commands
         commands.update(self.debug.get_commands())
         
         return commands
@@ -120,31 +126,3 @@ class BlueForgeInteractiveCLI:
         """Exit CLI gracefully"""
         print(f"\n{self.colors.OKCYAN}👋 Cleaning up connections...{self.colors.ENDC}")
         self.running = False
-
-async def main():
-    """Main CLI entry point"""
-    parser = argparse.ArgumentParser(description='BlueForge BLE Security Research Framework')
-    parser.add_argument('--version', action='version', version='BlueForge 2.0.0')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    parser.add_argument('--no-colors', action='store_true', help='Disable colored output')
-    
-    args = parser.parse_args()
-    
-    if args.debug:
-        set_log_level('DEBUG')
-    
-    cli = BlueForgeInteractiveCLI()
-    
-    if args.no_colors:
-        cli.colors.disable_colors()
-    
-    try:
-        await cli.run_interactive()
-    except KeyboardInterrupt:
-        print(f"\n{BlueForgeColors().OKCYAN}👋 Goodbye!{BlueForgeColors().ENDC}")
-    finally:
-        # Cleanup
-        await cli.session.ble_manager.cleanup()
-
-if __name__ == "__main__":
-    asyncio.run(main())

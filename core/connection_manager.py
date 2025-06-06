@@ -88,34 +88,29 @@ class BlueForgeConnectionManager:
                 callback(event)
             except Exception as e:
                 self.logger.error(f"Event callback failed: {e}")
+    # In core/connection_manager.py, modify the scan_devices method:
+
     async def scan_devices(self, duration: int = 10, 
-                    filter_func: Optional[Callable] = None) -> List[Dict[str, Any]]:
-        """Enhanced device scanning with classification"""
-        self.logger.info(f"Scanning for BLE devices (duration: {duration}s)")
+                        filter_func: Optional[Callable] = None,
+                        comprehensive: bool = True) -> List[Dict[str, Any]]:
+        """Enhanced device scanning with comprehensive discovery"""
         
-        try:
-            devices = await BleakScanner.discover(timeout=duration, return_adv=True)
-            discovered = []
-            
-            for device, adv_data in devices.values():
-                device_info = {
-                    'address': device.address,
-                    'name': device.name,
-                    'rssi': adv_data.rssi,  # Use adv_data.rssi instead of device.rssi
-                    'device_type': self._classify_device(device),
-                    'metadata': adv_data  # Use adv_data instead of device.metadata
-                }
-                
-                # Apply filter if provided
-                if filter_func is None or filter_func(device_info):
-                    discovered.append(device_info)
-            
-            self.logger.info(f"Discovered {len(discovered)} devices")
-            return discovered
-            
-        except Exception as e:
-            self.logger.error(f"Device scanning failed: {e}")
-            return []
+        if comprehensive:
+            # Use the enhanced scanner
+            from core.enhanced_scanner import EnhancedBLEScanner
+            scanner = EnhancedBLEScanner()
+            devices = await scanner.comprehensive_scan(duration, extended_discovery=True)
+        else:
+            # Use standard bleak scanning
+            devices = await BleakScanner.discover(timeout=duration)
+            devices = [self._convert_device_format(d) for d in devices]
+        
+        # Apply filtering
+        if filter_func:
+            devices = [d for d in devices if filter_func(d)]
+        
+        self.logger.info(f"Discovered {len(devices)} devices (comprehensive: {comprehensive})")
+        return devices
     
     def _classify_device(self, device) -> DeviceType:
         """Classify device type based on name and characteristics"""
