@@ -238,27 +238,27 @@ class BlueForgeInteractiveCLI:
             print(f"Client connected: {client.is_connected}")
             print(f"Client address: {client.address}")
             
-            # Perform service discovery first
-            print("Performing service discovery...")
-            services = await client.get_services()
-            print(f"Service discovery completed!")
+            # Use services property directly (modern bleak API)
+            print("Accessing services...")
+            services = client.services
             
-            # Now access services safely
+            # Count services by iterating since len() isn't supported
+            service_count = sum(1 for _ in services)
             print(f"Services object type: {type(services)}")
-            print(f"Services count: {len(services)}")
+            print(f"Services count: {service_count}")
             
             # Try to iterate
-            service_count = 0
+            actual_count = 0
             for service in services:
-                service_count += 1
-                print(f"Service {service_count}: {service.uuid}")
+                actual_count += 1
+                print(f"Service {actual_count}: {service.uuid}")
                 
                 char_count = 0
                 for char in service.characteristics:
                     char_count += 1
                     print(f"  Char {char_count}: {char.uuid} - Props: {char.properties}")
             
-            print(f"Total services found: {service_count}")
+            print(f"Total services found: {actual_count}")
             
         except Exception as e:
             print(f"{self.colors.FAIL}Debug failed: {e}{self.colors.ENDC}")

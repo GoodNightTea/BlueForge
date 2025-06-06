@@ -228,14 +228,14 @@ class BlueForgeConnectionManager:
             self.stats['failed_connections'] += 1
             self._emit_event(address, "failed", reason=str(e))
             return None
-    
+  
     async def _discover_services(self, conn_info: ConnectionInfo):
         """Discover and cache services/characteristics"""
         try:
             if not conn_info.client or not conn_info.client.is_connected:
                 return
             
-            # Use services property instead of get_services() to avoid deprecation
+            # Use services property directly (modern bleak API)
             services = conn_info.client.services
             
             conn_info.services = []

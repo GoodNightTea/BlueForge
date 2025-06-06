@@ -32,12 +32,13 @@ class GATTHandler:
     async def discover_services(self, client):
         """Discover all GATT services and characteristics"""
         try:
-            # First, perform service discovery explicitly
+            # Use the services property directly (no need to call get_services())
             logger.info("Performing service discovery...")
-            services = await client.get_services()
+            services = client.services
             
-            # Now we can access client.services safely
-            logger.info(f"Discovered {len(services)} services")
+            # Count services by iterating
+            services_count = sum(1 for _ in services)
+            logger.info(f"Discovered {services_count} services")
             
             service_data = []
             for service in services:
