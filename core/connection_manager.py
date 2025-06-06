@@ -88,23 +88,22 @@ class BlueForgeConnectionManager:
                 callback(event)
             except Exception as e:
                 self.logger.error(f"Event callback failed: {e}")
-    
     async def scan_devices(self, duration: int = 10, 
-                          filter_func: Optional[Callable] = None) -> List[Dict[str, Any]]:
+                    filter_func: Optional[Callable] = None) -> List[Dict[str, Any]]:
         """Enhanced device scanning with classification"""
         self.logger.info(f"Scanning for BLE devices (duration: {duration}s)")
         
         try:
-            devices = await BleakScanner.discover(timeout=duration)
+            devices = await BleakScanner.discover(timeout=duration, return_adv=True)
             discovered = []
             
-            for device in devices:
+            for device, adv_data in devices.values():
                 device_info = {
                     'address': device.address,
                     'name': device.name,
-                    'rssi': device.rssi,
+                    'rssi': adv_data.rssi,  # Use adv_data.rssi instead of device.rssi
                     'device_type': self._classify_device(device),
-                    'metadata': device.metadata if hasattr(device, 'metadata') else {}
+                    'metadata': adv_data  # Use adv_data instead of device.metadata
                 }
                 
                 # Apply filter if provided
@@ -141,7 +140,7 @@ class BlueForgeConnectionManager:
         
         return DeviceType.UNKNOWN
     
-    async def connect(self, address: str, force_reconnect: bool = False) -> Optional[BleakClient]:
+    async def connect(self, address: str, force_reconnect: bool = False, enable_pairing: bool = False) -> Optional[BleakClient]:
         """Connect to a BLE device with advanced error handling"""
         
         # Check if already connected
@@ -184,6 +183,19 @@ class BlueForgeConnectionManager:
             # Attempt connection
             await client.connect()
             
+            # Try pairing if enabled
+            if enable_pairing:
+                try:
+                    self.logger.info(f"Attempting to pair with {address}")
+                    # Check if pairing is available
+                    if hasattr(client, 'pair'):
+                        await client.pair()
+                        self.logger.info(f"Successfully paired with {address}")
+                    else:
+                        self.logger.warning(f"Pairing not supported on this platform")
+                except Exception as e:
+                    self.logger.warning(f"Pairing failed but continuing: {e}")
+            
             # Verify connection
             if not client.is_connected:
                 raise BleakError("Connection verification failed")
@@ -203,8 +215,8 @@ class BlueForgeConnectionManager:
             
             self.logger.info(f"Successfully connected to {address}")
             self._emit_event(address, "connected", 
-                           services_count=len(conn_info.services),
-                           device_type=conn_info.device_type.value)
+                        services_count=len(conn_info.services),
+                        device_type=conn_info.device_type.value)
             
             return client
             
@@ -442,7 +454,6 @@ class BlueForgeConnectionManager:
 # Enhanced BLE Manager that uses the connection manager
 class EnhancedBLEManager:
     """Enhanced BLE manager with advanced connection management"""
-    
     def __init__(self):
         self.connection_manager = BlueForgeConnectionManager()
         self.logger = get_logger(f"{__name__}.EnhancedBLEManager")
@@ -472,9 +483,9 @@ class EnhancedBLEManager:
         
         return [DeviceInfo(device) for device in devices]
     
-    async def connect(self, address: str) -> Optional[BleakClient]:
+    async def connect(self, address: str, enable_pairing: bool = False) -> Optional[BleakClient]:
         """Enhanced connection with automatic management"""
-        return await self.connection_manager.connect(address)
+        return await self.connection_manager.connect(address, enable_pairing=enable_pairing)
     
     async def disconnect(self, address: str) -> bool:
         """Enhanced disconnection"""

@@ -69,24 +69,39 @@ class PayloadGenerator:
         
         if bit_width == 8:
             values = [0x7F, 0x80, 0xFF, 0x100]
+            format_char = 'B'
         elif bit_width == 16:
             values = [0x7FFF, 0x8000, 0xFFFF, 0x10000]
+            format_char = 'H'
         elif bit_width == 32:
             values = [0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0x100000000]
+            format_char = 'I'
         elif bit_width == 64:
             values = [0x7FFFFFFFFFFFFFFF, 0x8000000000000000, 
-                     0xFFFFFFFFFFFFFFFF, 0x10000000000000000]
+                    0xFFFFFFFFFFFFFFFF, 0x10000000000000000]
+            format_char = 'Q'
+        else:
+            # Default to 32-bit if unsupported width
+            values = [0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0x100000000]
+            format_char = 'I'
         
         for value in values:
+            # Clamp value to valid range for the bit width
+            max_value = (1 << bit_width) - 1
+            clamped_value = value & max_value
+            
             # Little endian
             try:
-                payloads.append(struct.pack(f'<{"BHIQ"[bit_width//16]}', value & ((1 << bit_width) - 1)))
+                payloads.append(struct.pack(f'<{format_char}', clamped_value))
             except struct.error:
+                # If value is too large, skip it
                 pass
+            
             # Big endian
             try:
-                payloads.append(struct.pack(f'>{"BHIQ"[bit_width//16]}', value & ((1 << bit_width) - 1)))
+                payloads.append(struct.pack(f'>{format_char}', clamped_value))
             except struct.error:
+                # If value is too large, skip it
                 pass
         
         return payloads
@@ -95,7 +110,7 @@ class PayloadGenerator:
         """Generate common hex attack patterns"""
         patterns = [
             # Your original proven patterns
-            b'\xDE\xAD\xBE\xEF\xCA\xFE\xBA\xBE',  # Your ESP32 discovery!
+            b'\xDE\xAD\xBE\xEF\xCA\xFE\xBA\xBE',  # Generic value
             b'\x41\x41\x41\x41\x41\x41\x41\x41',  # Buffer overflow classic
             b'\x00\x00\x00\x00\x00\x00\x00\x00',  # Null bytes
             b'\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF',  # Max values
@@ -223,8 +238,9 @@ class AdvancedFuzzingEngine:
         self.fuzz_results.extend(results)
         return results
     
+    
     async def _generate_fuzz_cases(self, strategy: FuzzStrategy, 
-                                  target_char: str, max_cases: int) -> List[FuzzCase]:
+                                target_char: str, max_cases: int) -> List[FuzzCase]:
         """Generate fuzz cases based on strategy"""
         
         cases = []
@@ -240,7 +256,7 @@ class AdvancedFuzzingEngine:
         elif strategy == FuzzStrategy.SMART_MUTATION:
             # Combine multiple payload types intelligently
             hex_payloads = self.payload_generator.hex_patterns()
-            overflow_payloads = self.payload_generator.integer_overflows(64)  # Your 8-byte discovery
+            overflow_payloads = self.payload_generator.integer_overflows(32)  # Fixed: use 32-bit
             protocol_payloads = self.payload_generator.protocol_aware_gatt(target_char)
             
             all_payloads = hex_payloads + overflow_payloads + protocol_payloads
@@ -253,7 +269,6 @@ class AdvancedFuzzingEngine:
                 ))
         
         elif strategy == FuzzStrategy.TIMING_BASED:
-            # Your proven timing-based approach
             cases = self.payload_generator.timing_attack_payloads()[:max_cases]
         
         elif strategy == FuzzStrategy.PROTOCOL_AWARE:
@@ -265,25 +280,49 @@ class AdvancedFuzzingEngine:
                     target=FuzzTarget.GATT_CHARACTERISTICS
                 ))
         
+        elif strategy == FuzzStrategy.BOUNDARY_VALUE:
+            # Generate boundary cases inline
+            boundary_sizes = [0, 1, 2, 4, 8, 16, 20, 32, 64, 128, 255, 256, 512]
+            for size in boundary_sizes[:max_cases]:
+                if size == 0:
+                    payload = b''
+                else:
+                    payload = b'A' * size
+                
+                cases.append(FuzzCase(
+                    payload=payload,
+                    strategy=strategy,
+                    target=FuzzTarget.GATT_CHARACTERISTICS
+                ))
+        
         return cases
-    
+
     async def _execute_fuzz_case(self, client, target_char: str, case: FuzzCase) -> FuzzResult:
         """Execute a single fuzz case"""
         start_time = time.time()
         
         try:
-            # Handle timing-sensitive cases (your ESP32 methodology)
+            # Handle timing-sensitive cases
             if case.timing_sensitive:
                 for i in range(case.iterations):
-                    await client.write_gatt_char(target_char, case.payload)
+                    try:
+                        await client.write_gatt_char(target_char, case.payload, response=False)
+                    except Exception:
+                        try:
+                            await client.write_gatt_char(target_char, case.payload, response=True)
+                        except Exception:
+                            await self._force_write_readonly(client, target_char, case.payload)
+                    
                     if case.delay_ms > 0:
                         await asyncio.sleep(case.delay_ms / 1000)
             else:
-                await client.write_gatt_char(target_char, case.payload)
+                try:
+                    await client.write_gatt_char(target_char, case.payload)
+                except Exception:
+                    await self._force_write_readonly(client, target_char, case.payload)
             
-            # Monitor for crashes (your proven technique)
+            # Monitor for crashes
             crashed = await self._monitor_for_crash(client, target_char)
-            
             response_time = time.time() - start_time
             
             return FuzzResult(
@@ -299,17 +338,33 @@ class AdvancedFuzzingEngine:
             return FuzzResult(
                 case=case,
                 success=False,
-                crashed=True,  # Exception likely means crash
+                crashed=True,
                 response_time=response_time,
                 error_message=str(e),
                 anomaly_detected=True
             )
+
+    async def _force_write_readonly(self, client, char_uuid: str, payload: bytes):
+        """Force write to read-only characteristics"""
+        try:
+            await client.write_gatt_char(char_uuid, payload, response=False)
+        except Exception:
+            try:
+                # Low-level approach - find characteristic by UUID
+                for svc in client.services:
+                    for char in svc.characteristics:
+                        if char.uuid == char_uuid:
+                            # Try direct handle write
+                            if hasattr(client, '_backend'):
+                                await client._backend.write_gatt_char(char.handle, payload, False)
+                            break
+            except Exception as e:
+                self.logger.debug(f"Force write failed (expected): {e}")
     
     async def _monitor_for_crash(self, client, target_char: str, timeout: int = 10) -> bool:
-        """Monitor for device crashes (your proven method)"""
+        """Monitor for device crashes"""
         for i in range(timeout):
             try:
-                # Try to read the characteristic to test responsiveness
                 await client.read_gatt_char(target_char)
                 await asyncio.sleep(1)
             except:
@@ -321,43 +376,156 @@ class AdvancedFuzzingEngine:
     async def _analyze_result(self, result: FuzzResult):
         """Analyze results and learn patterns"""
         if result.crashed:
-            # Track crash patterns
-            payload_pattern = result.case.payload[:8].hex()  # First 8 bytes
+            payload_pattern = result.case.payload[:8].hex()
             self.crash_patterns[payload_pattern] = self.crash_patterns.get(payload_pattern, 0) + 1
             
             self.logger.warning(f"CRASH DETECTED: Payload {payload_pattern} "
                               f"(strategy: {result.case.strategy.value})")
-    
+
     # Strategy implementations
     async def _random_fuzz(self, client, target_char: str, max_cases: int) -> List[FuzzResult]:
         """Random mutation fuzzing"""
-        # Implementation here
-        pass
-    
+        results = []
+        for i in range(max_cases):
+            payload = self.payload_generator.random_bytes(1, 512)
+            case = FuzzCase(
+                payload=payload,
+                strategy=FuzzStrategy.RANDOM_MUTATION,
+                target=FuzzTarget.GATT_CHARACTERISTICS
+            )
+            result = await self._execute_fuzz_case(client, target_char, case)
+            results.append(result)
+            await asyncio.sleep(0.1)
+        return results
+
     async def _smart_fuzz(self, client, target_char: str, max_cases: int) -> List[FuzzResult]:
         """Smart mutation combining multiple techniques"""
-        # Implementation here  
-        pass
-    
+        results = []
+        
+        hex_payloads = self.payload_generator.hex_patterns()
+        overflow_payloads = self.payload_generator.integer_overflows(32)
+        protocol_payloads = self.payload_generator.protocol_aware_gatt(target_char)
+        
+        all_payloads = (hex_payloads + overflow_payloads + protocol_payloads)[:max_cases]
+        
+        for payload in all_payloads:
+            case = FuzzCase(
+                payload=payload,
+                strategy=FuzzStrategy.SMART_MUTATION,
+                target=FuzzTarget.GATT_CHARACTERISTICS
+            )
+            result = await self._execute_fuzz_case(client, target_char, case)
+            results.append(result)
+            await asyncio.sleep(0.1)
+        
+        return results
+
     async def _protocol_aware_fuzz(self, client, target_char: str, max_cases: int) -> List[FuzzResult]:
-        """Protocol-aware fuzzing for GATT/ATT violations"""
-        # Implementation here
-        pass
-    
+        """Protocol-aware fuzzing"""
+        results = []
+        payloads = self.payload_generator.protocol_aware_gatt(target_char)
+        
+        for payload in payloads[:max_cases]:
+            case = FuzzCase(
+                payload=payload,
+                strategy=FuzzStrategy.PROTOCOL_AWARE,
+                target=FuzzTarget.GATT_CHARACTERISTICS
+            )
+            result = await self._execute_fuzz_case(client, target_char, case)
+            results.append(result)
+            await asyncio.sleep(0.1)
+        
+        return results
+
     async def _state_machine_fuzz(self, client, target_char: str, max_cases: int) -> List[FuzzResult]:
         """State machine confusion fuzzing"""
-        # Implementation here
-        pass
-    
+        results = []
+        payloads = self.payload_generator.state_machine_payloads()
+        
+        for payload in payloads[:max_cases]:
+            case = FuzzCase(
+                payload=payload,
+                strategy=FuzzStrategy.STATE_MACHINE,
+                target=FuzzTarget.GATT_CHARACTERISTICS
+            )
+            result = await self._execute_fuzz_case(client, target_char, case)
+            results.append(result)
+            await asyncio.sleep(0.1)
+        
+        return results
+
     async def _timing_fuzz(self, client, target_char: str, max_cases: int) -> List[FuzzResult]:
-        """Timing-based fuzzing (your ESP32 methodology)"""
-        # Implementation here
-        pass
-    
+        """Timing-based fuzzing with race condition detection"""
+        results = []
+        
+        race_detected = await self._detect_race_conditions(client, target_char)
+        
+        if race_detected:
+            self.logger.info("Race condition detected - using aggressive timing")
+            timing_cases = self.payload_generator.timing_attack_payloads()[:max_cases]
+            for case in timing_cases:
+                result = await self._execute_fuzz_case(client, target_char, case)
+                results.append(result)
+        else:
+            self.logger.info("No race conditions detected - using standard timing")
+            for i in range(min(max_cases, 10)):
+                payload = self.payload_generator.random_bytes(8, 16)
+                case = FuzzCase(
+                    payload=payload,
+                    strategy=FuzzStrategy.TIMING_BASED,
+                    target=FuzzTarget.GATT_CHARACTERISTICS,
+                    timing_sensitive=False,
+                    iterations=1,
+                    delay_ms=5
+                )
+                result = await self._execute_fuzz_case(client, target_char, case)
+                results.append(result)
+        
+        return results
+
     async def _boundary_fuzz(self, client, target_char: str, max_cases: int) -> List[FuzzResult]:
         """Boundary value analysis fuzzing"""
-        # Implementation here
-        pass
+        results = []
+        
+        boundary_sizes = [0, 1, 2, 4, 8, 16, 20, 32, 64, 128, 255, 256, 512, 1024]
+        
+        for size in boundary_sizes[:max_cases]:
+            if size == 0:
+                payload = b''
+            else:
+                payload = b'A' * size
+            
+            case = FuzzCase(
+                payload=payload,
+                strategy=FuzzStrategy.BOUNDARY_VALUE,
+                target=FuzzTarget.GATT_CHARACTERISTICS
+            )
+            result = await self._execute_fuzz_case(client, target_char, case)
+            results.append(result)
+            await asyncio.sleep(0.1)
+        
+        return results
+
+    async def _detect_race_conditions(self, client, target_char: str) -> bool:
+        """Detect if target is susceptible to race conditions"""
+        try:
+            test_payload = b'\x42' * 8
+            
+            for i in range(5):
+                try:
+                    await client.write_gatt_char(target_char, test_payload, response=False)
+                except:
+                    pass
+                await asyncio.sleep(0.001)
+            
+            try:
+                await client.read_gatt_char(target_char)
+                return False
+            except:
+                return True
+                
+        except Exception:
+            return False
     
     def generate_report(self) -> Dict[str, Any]:
         """Generate comprehensive fuzzing report"""
@@ -384,35 +552,3 @@ class AdvancedFuzzingEngine:
         if strategy_crashes:
             return max(strategy_crashes, key=strategy_crashes.get)
         return "none"
-
-# Usage example for your memory research module
-class BlueForgeAdvancedFuzzer:
-    """High-level interface for BlueForge fuzzing"""
-    
-    def __init__(self):
-        self.engine = AdvancedFuzzingEngine()
-        self.logger = get_logger(f"{__name__}.BlueForgeAdvancedFuzzer")
-    
-    async def comprehensive_fuzz(self, client, target_char: str) -> Dict[str, Any]:
-        """Run comprehensive fuzzing campaign"""
-        
-        all_results = []
-        
-        # Run multiple strategies
-        strategies = [
-            FuzzStrategy.SMART_MUTATION,
-            FuzzStrategy.TIMING_BASED,    # Your ESP32 methodology
-            FuzzStrategy.PROTOCOL_AWARE,
-            FuzzStrategy.BOUNDARY_VALUE
-        ]
-        
-        for strategy in strategies:
-            self.logger.info(f"Running {strategy.value} fuzzing...")
-            results = await self.engine.fuzz_target(client, target_char, strategy, max_cases=25)
-            all_results.extend(results)
-        
-        # Generate comprehensive report
-        report = self.engine.generate_report()
-        report["detailed_results"] = all_results
-        
-        return report
