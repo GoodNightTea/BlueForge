@@ -32,15 +32,15 @@ class GATTHandler:
     async def discover_services(self, client):
         """Discover all GATT services and characteristics"""
         try:
-            # Use the services property instead of get_services()
-            services = client.services
+            # First, perform service discovery explicitly
+            logger.info("Performing service discovery...")
+            services = await client.get_services()
             
-            # Convert to list to count properly
-            service_list = list(services)
-            logger.info(f"Discovered {len(service_list)} services")
+            # Now we can access client.services safely
+            logger.info(f"Discovered {len(services)} services")
             
             service_data = []
-            for service in service_list:
+            for service in services:
                 service_info = {
                     'uuid': service.uuid,
                     'handle': service.handle,
@@ -75,8 +75,7 @@ class GATTHandler:
             
         except Exception as e:
             logger.error(f"Service discovery failed: {e}")
-            logger.error(f"Services object type: {type(client.services)}")
-            logger.error(f"Client connected: {client.is_connected}")
+            logger.error(f"Client connected: {client.is_connected if hasattr(client, 'is_connected') else 'Unknown'}")
             return []
     
     async def enable_notifications(self, client, characteristic_uuid, callback):

@@ -238,10 +238,14 @@ class BlueForgeInteractiveCLI:
             print(f"Client connected: {client.is_connected}")
             print(f"Client address: {client.address}")
             
-            # Get services directly
-            services = client.services
+            # Perform service discovery first
+            print("Performing service discovery...")
+            services = await client.get_services()
+            print(f"Service discovery completed!")
+            
+            # Now access services safely
             print(f"Services object type: {type(services)}")
-            print(f"Services object: {services}")
+            print(f"Services count: {len(services)}")
             
             # Try to iterate
             service_count = 0
@@ -260,6 +264,116 @@ class BlueForgeInteractiveCLI:
             print(f"{self.colors.FAIL}Debug failed: {e}{self.colors.ENDC}")
             import traceback
             traceback.print_exc()
+
+    async def cmd_disconnect(self, args: List[str]):
+        """Disconnect from a device"""
+        index = self.get_device_from_args_or_active(args)
+        
+        if index is None:
+            if not args and len(self.session.connected_devices) > 1:
+                print(f"{self.colors.FAIL}Multiple devices connected. Specify index: disconnect <device_index>{self.colors.ENDC}")
+            elif not args and len(self.session.connected_devices) == 0:
+                print(f"{self.colors.FAIL}No devices connected{self.colors.ENDC}")
+            else:
+                print(f"{self.colors.FAIL}Usage: disconnect [device_index]{self.colors.ENDC}")
+            return
+        
+        if index not in self.session.connected_devices:
+            print(f"{self.colors.FAIL}Device not connected{self.colors.ENDC}")
+            return
+        
+        device_info = self.session.connected_devices[index]
+        device = device_info['device']
+        
+        print(f"{self.colors.OKCYAN}📤 Disconnecting from {device.name or 'Unknown'}...{self.colors.ENDC}")
+        
+        try:
+            success = await self.session.ble_manager.disconnect(device.address)
+            if success:
+                del self.session.connected_devices[index]
+                print(f"{self.colors.OKGREEN}✓ Disconnected successfully{self.colors.ENDC}")
+            else:
+                print(f"{self.colors.FAIL}❌ Disconnect failed{self.colors.ENDC}")
+        except Exception as e:
+            print(f"{self.colors.FAIL}❌ Disconnect error: {e}{self.colors.ENDC}")
+
+    async def cmd_info(self, args: List[str]):
+        """Show detailed device information"""
+        index = self.get_device_from_args_or_active(args)
+        
+        if index is None:
+            print(f"{self.colors.FAIL}No device specified. Usage: info [device_index]{self.colors.ENDC}")
+            return
+        
+        if index >= len(self.session.discovered_devices):
+            print(f"{self.colors.FAIL}Invalid device index{self.colors.ENDC}")
+            return
+        
+        device = self.session.discovered_devices[index]
+        is_connected = index in self.session.connected_devices
+        
+        print(f"\n{self.colors.BOLD}DEVICE INFORMATION:{self.colors.ENDC}")
+        print(f"  📱 Index: {index}")
+        print(f"  🏷️  Name: {device.name or 'Unknown Device'}")
+        print(f"  📍 Address: {device.address}")
+        print(f"  📶 RSSI: {getattr(device, 'rssi', 'Unknown')} dBm")
+        print(f"  🔗 Status: {'Connected' if is_connected else 'Disconnected'}")
+        
+        if is_connected:
+            conn_info = self.session.connected_devices[index]
+            connected_at = conn_info['connected_at'].strftime("%Y-%m-%d %H:%M:%S")
+            print(f"  ⏰ Connected since: {connected_at}")
+
+    async def cmd_validate(self, args: List[str]):
+        """Validate device for vulnerabilities"""
+        index = self.get_device_from_args_or_active(args)
+        
+        if index is None or index not in self.session.connected_devices:
+            print(f"{self.colors.FAIL}No device connected for validation{self.colors.ENDC}")
+            return
+        
+        device_info = self.session.connected_devices[index]
+        device = device_info['device']
+        
+        print(f"{self.colors.OKCYAN}🔍 Validating {device.name or 'Unknown'} for vulnerabilities...{self.colors.ENDC}")
+        
+        try:
+            is_vulnerable = await self.session.researcher.validate_target(device)
+            
+            if is_vulnerable:
+                print(f"{self.colors.WARNING}⚠️  Device appears to have interesting characteristics for research{self.colors.ENDC}")
+                print(f"{self.colors.OKGREEN}✅ Device is a good candidate for security testing{self.colors.ENDC}")
+            else:
+                print(f"{self.colors.OKBLUE}ℹ️  Device has limited attack surface{self.colors.ENDC}")
+                
+        except Exception as e:
+            print(f"{self.colors.FAIL}❌ Validation error: {e}{self.colors.ENDC}")
+
+    async def cmd_research(self, args: List[str]):
+        """Start security research on device"""
+        print(f"{self.colors.WARNING}⚠️  Research functionality not fully implemented yet{self.colors.ENDC}")
+        print(f"{self.colors.OKBLUE}ℹ️  Use 'validate' and 'fuzz' commands for now{self.colors.ENDC}")
+
+    async def cmd_fuzz(self, args: List[str]):
+        """Start fuzzing device"""
+        print(f"{self.colors.WARNING}⚠️  Fuzzing functionality not fully implemented yet{self.colors.ENDC}")
+        print(f"{self.colors.OKBLUE}ℹ️  Coming soon - advanced fuzzing capabilities{self.colors.ENDC}")
+
+    def cmd_stats(self, args: List[str]):
+        """Show session statistics"""
+        print(f"\n{self.colors.BOLD}SESSION STATISTICS:{self.colors.ENDC}")
+        print(f"  📊 Session started: {self.session.session_stats['session_start'].strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  🔍 Scans performed: {self.session.session_stats['scans_performed']}")
+        print(f"  🎯 Devices tested: {self.session.session_stats['devices_tested']}")
+        print(f"  💥 Vulnerabilities found: {self.session.session_stats['vulnerabilities_found']}")
+        
+        # Connection manager stats
+        cm_stats = self.session.ble_manager.connection_manager.get_statistics()
+        print(f"  🔗 Total connections: {cm_stats['total_connections']}")
+        print(f"  ✅ Successful connections: {cm_stats['successful_connections']}")
+        print(f"  ❌ Failed connections: {cm_stats['failed_connections']}")
+        print(f"  💥 Crashes detected: {cm_stats['crashes_detected']}")
+
 
     async def cmd_services(self, args: List[str]):
         """List device services and characteristics"""
@@ -417,21 +531,28 @@ class BlueForgeInteractiveCLI:
         """Run interactive CLI mode"""
         self.print_banner()
         
-        # Commands dictionary with all the new commands
+        # Commands dictionary with ALL commands
         commands = {
             'help': self.print_help,
             'scan': self.cmd_scan,
             'devices': self.cmd_devices,
             'connect': self.cmd_connect,
             'connected': self.cmd_connected,
+            'disconnect': self.cmd_disconnect,  # Add this
+            'info': self.cmd_info,              # Add this
             'services': self.cmd_services,
             'chars': self.cmd_chars,
+            'validate': self.cmd_validate,      # Add this
+            'research': self.cmd_research,      # Add this
+            'fuzz': self.cmd_fuzz,             # Add this
+            'stats': self.cmd_stats,           # Add this
             'debug-services': self.cmd_debug_services,
             'status': self.cmd_status,
             'clear': self.cmd_clear,
             'exit': self.exit_cli,
             'quit': self.exit_cli,
         }
+        
         
         while self.running:
             try:
