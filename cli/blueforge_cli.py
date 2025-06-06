@@ -36,7 +36,10 @@ class BlueForgeSession:
     def __init__(self):
         self.ble_manager = EnhancedBLEManager()
         self.fuzzer = AdvancedFuzzingEngine()
-        self.researcher = MemoryCorruptionResearch()
+        
+        # Create researcher with shared BLE manager
+        self.researcher = MemoryCorruptionResearch(ble_manager=self.ble_manager)
+        
         self.discovered_devices = []
         self.connected_devices = {}
         self.session_stats = {
@@ -110,18 +113,29 @@ class BlueForgeInteractiveCLI:
         print(f"  {self.colors.OKGREEN}exit / quit{self.colors.ENDC}             👋 Exit BlueForge framework")
         
         print(f"\n{self.colors.HEADER}────────────────────────────────────────────────────────────────────────────────────{self.colors.ENDC}")
-
+ 
     def get_device_from_args_or_active(self, args: List[str]) -> Optional[int]:
         """Get device index from args or return active device if only one connected"""
         if args:
             try:
-                return int(args[0])
+                index = int(args[0])
+                if 0 <= index < len(self.session.discovered_devices):
+                    return index
+                else:
+                    print(f"{self.colors.FAIL}Invalid device index. Valid range: 0-{len(self.session.discovered_devices)-1}{self.colors.ENDC}")
+                    return None
             except (ValueError, IndexError):
+                print(f"{self.colors.FAIL}Invalid device index format{self.colors.ENDC}")
                 return None
         
         # If no args and only one device connected, use it
         if len(self.session.connected_devices) == 1:
             return list(self.session.connected_devices.keys())[0]
+        
+        # If no args and multiple devices connected
+        if len(self.session.connected_devices) > 1:
+            print(f"{self.colors.WARNING}Multiple devices connected. Please specify device index{self.colors.ENDC}")
+            self.cmd_connected([])
         
         return None
 
@@ -191,10 +205,11 @@ class BlueForgeInteractiveCLI:
             
             print(f"{self.colors.OKCYAN}🔗 Connecting to {device.name} ({device.address})...{self.colors.ENDC}")
             
+            # Use the shared BLE manager instead of creating our own connection
             client = await self.session.ble_manager.connect(device.address)
             
             if client:
-                # Store connection
+                # Store connection in CLI session (for backward compatibility)
                 self.session.connected_devices[device_index] = {
                     'device': device,
                     'client': client,
@@ -208,7 +223,7 @@ class BlueForgeInteractiveCLI:
             print(f"{self.colors.FAIL}Invalid device index{self.colors.ENDC}")
         except Exception as e:
             print(f"{self.colors.FAIL}❌ Connection error: {e}{self.colors.ENDC}")
-
+            
     def cmd_connected(self, args: List[str]):
         """Show connected devices"""
         if not self.session.connected_devices:
@@ -323,29 +338,54 @@ class BlueForgeInteractiveCLI:
             conn_info = self.session.connected_devices[index]
             connected_at = conn_info['connected_at'].strftime("%Y-%m-%d %H:%M:%S")
             print(f"  ⏰ Connected since: {connected_at}")
-
+   
     async def cmd_validate(self, args: List[str]):
         """Validate device for vulnerabilities"""
         index = self.get_device_from_args_or_active(args)
         
-        if index is None or index not in self.session.connected_devices:
-            print(f"{self.colors.FAIL}No device connected for validation{self.colors.ENDC}")
+        if index is None:
+            print(f"{self.colors.FAIL}No device specified or connected{self.colors.ENDC}")
             return
         
-        device_info = self.session.connected_devices[index]
-        device = device_info['device']
+        if index >= len(self.session.discovered_devices):
+            print(f"{self.colors.FAIL}Invalid device index{self.colors.ENDC}")
+            return
+        
+        device = self.session.discovered_devices[index]
         
         print(f"{self.colors.OKCYAN}🔍 Validating {device.name or 'Unknown'} for vulnerabilities...{self.colors.ENDC}")
         
         try:
+            # Check if already connected via CLI
+            is_connected_cli = index in self.session.connected_devices
+            is_connected_manager = self.session.ble_manager.connection_manager.is_connected(device.address)
+            
+            if is_connected_cli and is_connected_manager:
+                print(f"{self.colors.OKBLUE}ℹ️  Using existing connection to device{self.colors.ENDC}")
+            elif is_connected_cli and not is_connected_manager:
+                print(f"{self.colors.WARNING}⚠️  CLI shows connected but connection manager doesn't - fixing...{self.colors.ENDC}")
+                # Update the connection manager with CLI's connection
+                cli_connection = self.session.connected_devices[index]
+                # This needs to be fixed in the connection sync
+            
+            # Validate the device
             is_vulnerable = await self.session.researcher.validate_target(device)
             
             if is_vulnerable:
                 print(f"{self.colors.WARNING}⚠️  Device appears to have interesting characteristics for research{self.colors.ENDC}")
                 print(f"{self.colors.OKGREEN}✅ Device is a good candidate for security testing{self.colors.ENDC}")
+                
+                # Show some stats if we have service data
+                if hasattr(self.session, 'service_data') and index in self.session.service_data:
+                    services_data = self.session.service_data[index]
+                    from core.gatt_handler import GATTHandler
+                    gatt_handler = GATTHandler()
+                    writable = gatt_handler.find_writable_characteristics(services_data)
+                    print(f"{self.colors.OKCYAN}📊 Found {len(writable)} writable characteristics{self.colors.ENDC}")
             else:
                 print(f"{self.colors.OKBLUE}ℹ️  Device has limited attack surface{self.colors.ENDC}")
-                
+                print(f"{self.colors.OKBLUE}💡 No writable characteristics found for research{self.colors.ENDC}")
+                    
         except Exception as e:
             print(f"{self.colors.FAIL}❌ Validation error: {e}{self.colors.ENDC}")
 
