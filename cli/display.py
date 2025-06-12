@@ -216,48 +216,16 @@ class DisplayManager:
                         print(f"    Data extracted: {len(data)} items")
     
     def print_device_intelligence(self, profile: Dict[str, Any]):
-        """Print device intelligence analysis"""
-        device_name = profile.get('name', 'Unknown Device')
-        device_type = profile.get('device_type', 'unknown')
-        security_profile = profile.get('security_profile', 'unknown')
-        research_potential = profile.get('research_potential', 0)
-        
-        print(f"\n{self.theme.highlight_color}🔍 Device Intelligence Report:{self.colors.ENDC}")
-        print("─" * 50)
-        
-        print(f"Device: {self.theme.device_color}{device_name}{self.colors.ENDC}")
-        print(f"Type: {device_type.replace('_', ' ').title()}")
-        print(f"Security Profile: {security_profile.upper()}")
-        
-        # Research potential with color coding
-        if research_potential >= 8:
-            potential_color = self.colors.OKGREEN
-            potential_text = "HIGH PRIORITY"
-        elif research_potential >= 6:
-            potential_color = self.colors.WARNING
-            potential_text = "MODERATE"
-        elif research_potential >= 3:
-            potential_color = self.colors.YELLOW
-            potential_text = "LOW"
-        else:
-            potential_color = self.colors.GREY
-            potential_text = "MINIMAL"
-        
-        print(f"Research Potential: {potential_color}{research_potential}/10 ({potential_text}){self.colors.ENDC}")
-        
-        # Show indicators
-        indicators = profile.get('indicators', [])
-        if indicators and self.level in [DisplayLevel.VERBOSE, DisplayLevel.DEBUG]:
-            print(f"\n{self.theme.highlight_color}Analysis Indicators:{self.colors.ENDC}")
-            for indicator in indicators:
-                print(f"  ✓ {indicator}")
-        
-        # Show warnings
-        warnings = profile.get('warnings', [])
-        if warnings:
-            print(f"\n{self.theme.warning_color}Security Warnings:{self.colors.ENDC}")
-            for warning in warnings:
-                print(f"  ⚠ {warning}")
+        """Pretty-print device intelligence profile with risk and fingerprint info"""
+        print(f"\n{self.colors.BOLD}Device Intelligence Report:{self.colors.ENDC}")
+        print("─" * 60)
+        for k, v in profile.items():
+            if k == 'risk_score':
+                print(f"{self.colors.WARNING}Risk Score:{self.colors.ENDC} {v}/10")
+            elif k == 'security_profile':
+                print(f"{self.colors.FAIL}Security Profile:{self.colors.ENDC} {v}")
+            else:
+                print(f"{self.colors.OKCYAN}{k.replace('_',' ').title()}{self.colors.ENDC}: {v}")
     
     def print_timing_analysis(self, timing_data: Dict[str, Any]):
         """Print timing attack analysis"""
@@ -531,3 +499,31 @@ Type 'help' for available commands or 'scan' to discover devices.
                 print(f"ASCII: {ascii_repr[:50]}{'...' if len(ascii_repr) > 50 else ''}")
         except:
             pass
+    
+    def print_fuzzing_history(self, history: List[dict]):
+        """Print a table of recent fuzzing sessions for a device"""
+        if not history:
+            self.print_info("No fuzzing history for this device.")
+            return
+        print(f"\n{self.theme.highlight_color}🧬 Fuzzing History:{self.colors.ENDC}")
+        print("─" * 60)
+        headers = ["Session ID", "Char UUID", "Strategy", "Cases", "Crashes", "Time"]
+        rows = [
+            [h['session_id'], h['char_uuid'], h['strategy'], h['max_cases'], h['crashes_found'], h['session_time']] for h in history
+        ]
+        self.print_table(headers, rows)
+    
+    def print_fuzzing_crash_cases(self, crash_cases: List[dict]):
+        """Print a summary of crash cases from a fuzzing session"""
+        if not crash_cases:
+            self.print_info("No crash cases recorded for this session.")
+            return
+        print(f"\n{self.theme.vulnerability_color}Crash Cases:{self.colors.ENDC}")
+        print("─" * 60)
+        headers = ["Char UUID", "Crash Type", "Payload (hex)", "Response (hex)"]
+        rows = []
+        for c in crash_cases:
+            payload_hex = c['payload'].hex()[:32] + ("..." if len(c['payload']) > 16 else "")
+            response_hex = c['response'].hex()[:32] + ("..." if len(c['response']) > 16 else "")
+            rows.append([c['char_uuid'], c['crash_type'], payload_hex, response_hex])
+        self.print_table(headers, rows)

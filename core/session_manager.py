@@ -1,4 +1,3 @@
-
 # core/session_manager.py - State Management
 import time
 import json
@@ -47,6 +46,8 @@ class SessionManager:
         
         self.logger.info("Session manager initialized")
     
+
+    # Update existing method to return both formats
     async def scan_for_devices(self, duration: int = 10) -> List[BLEDevice]:
         """Scan for BLE devices and update session state"""
         self.logger.info(f"Starting device scan ({duration}s)")
@@ -57,7 +58,6 @@ class SessionManager:
         self.discovered_devices = devices
         self.stats.scans_performed += 1
         
-        # Log results
         self.logger.info(f"Scan completed: {len(devices)} devices discovered")
         
         # Categorize devices for better overview
@@ -65,7 +65,107 @@ class SessionManager:
         self.session_data['last_scan_categories'] = categories
         
         return devices
-    
+
+    # Add property accessors for clean interface
+    @property
+    def discovered_devices_dict(self) -> List[Dict[str, Any]]:
+        """Get discovered devices as dictionary list"""
+        return [self._device_to_dict(device) for device in self.discovered_devices]
+
+    @property
+    def connected_devices_dict(self) -> List[Dict[str, Any]]:
+        """Get connected devices as dictionary list"""
+        connected = []
+        for idx, conn_info in self.connected_devices.items():
+            device_dict = self._device_to_dict(conn_info.device)
+            device_dict['connected_at'] = conn_info.connected_at
+            device_dict['quality'] = conn_info.quality
+            connected.append(device_dict)
+        return connected
+
+    async def connect_by_address(self, device_address: str) -> bool:
+        """Connect to device by address - finds index automatically"""
+        for i, device in enumerate(self.discovered_devices):
+            if device.address == device_address:
+                conn_info = await self.connect_to_device(i)
+                return conn_info is not None
+        return False
+
+    async def disconnect_by_address(self, device_address: str) -> bool:
+        """Disconnect device by address - finds index automatically"""
+        for idx, conn_info in self.connected_devices.items():
+            if conn_info.device.address == device_address:
+                return await self.disconnect_device(idx)
+        return False
+
+    def get_ble_client(self, device_address: str):
+        """Get BLE client for device address"""
+        return self.ble_manager.get_connection(device_address)
+
+    def _device_to_dict(self, device: BLEDevice) -> Dict[str, Any]:
+        """Convert BLEDevice to dict representation"""
+        return {
+            'address': device.address,
+            'name': device.name,
+            'rssi': device.rssi,
+            'device_type': device.device_type,
+            'vendor': device.vendor,
+            'manufacturer_data': device.manufacturer_data,
+            'service_uuids': device.service_uuids,
+            'privacy_enabled': device.privacy_enabled,
+            'research_potential': device.research_potential
+        }
+
+    # Add vulnerability storage (simple implementation)
+    def store_vulnerabilities(self, device_address: str, vulnerabilities: List):
+        """Store vulnerabilities for device"""
+        if 'vulnerabilities' not in self.session_data:
+            self.session_data['vulnerabilities'] = {}
+        self.session_data['vulnerabilities'][device_address] = vulnerabilities
+
+    def get_vulnerabilities(self, device_address: str) -> List:
+        """Get stored vulnerabilities for device"""
+        return self.session_data.get('vulnerabilities', {}).get(device_address, [])
+
+    def get_session_data(self) -> Dict[str, Any]:
+        """Get session data for compatibility"""
+        return {
+            'statistics': {
+                'scans_performed': self.stats.scans_performed,
+                'devices_tested': self.stats.devices_tested,
+                'vulnerabilities_found': self.stats.vulnerabilities_found,
+                'connections_made': self.stats.connections_made,
+                'fuzzing_sessions': self.stats.fuzzing_sessions
+            }
+        }
+
+    async def reset_session(self):
+        """Reset session data"""
+        await self.cleanup()
+        self.__init__()
+
+    async def save_session(self, filename: str):
+        """Save session to file"""
+        self.export_session_data(filename)
+
+    async def load_session(self, filename: str):
+        """Load session from file"""
+        self.import_session_data(filename)
+
+    def _device_to_dict(self, device) -> Dict[str, Any]:
+        """Convert BLEDevice to dict for compatibility"""
+        return {
+            'address': device.address,
+            'name': device.name,
+            'rssi': device.rssi,
+            'device_type': device.device_type,
+            'vendor': device.vendor,
+            'manufacturer_data': device.manufacturer_data,
+            'service_uuids': device.service_uuids,
+            'privacy_enabled': device.privacy_enabled,
+            'research_potential': device.research_potential
+        }
+
     def _categorize_devices(self, devices: List[BLEDevice]) -> Dict[str, List[BLEDevice]]:
         """Categorize devices by type for organized display"""
         categories = {

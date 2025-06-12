@@ -1,4 +1,3 @@
-
 # core/device_intelligence.py - Device Analysis & Classification
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -464,3 +463,54 @@ class DeviceIntelligence:
             return "Low (10-40%)"
         else:
             return "Unknown"
+    
+    def analyze_device_by_address(self, session_manager, device_identifier: str) -> DeviceProfile:
+        """
+        Analyze device using address or ID.
+        If connected, use live services from BLE client.
+        Otherwise, use advertised services.
+        """
+        # Try to find device dict
+        device = None
+        devices = session_manager.discovered_devices_dict
+        # Try by index
+        if device_identifier.isdigit():
+            idx = int(device_identifier) - 1
+            if 0 <= idx < len(devices):
+                device = devices[idx]
+        # Try by address
+        if not device:
+            for d in devices:
+                if d['address'].lower() == device_identifier.lower():
+                    device = d
+                    break
+        if not device:
+            # Try by name
+            for d in devices:
+                if device_identifier.lower() in (d.get('name') or '').lower():
+                    device = d
+                    break
+        if not device:
+            raise ValueError(f"Device not found: {device_identifier}")
+
+        # Try to get live services if connected
+        client = session_manager.get_ble_client(device['address'])
+        service_uuids = device.get('service_uuids', [])
+        if client and getattr(client, 'is_connected', False):
+            try:
+                # Use live services if available
+                if hasattr(client, 'services') and client.services:
+                    service_uuids = [str(s.uuid) for s in client.services]
+            except Exception:
+                pass
+
+        # Build BLEDevice for analysis
+        from core.ble_manager import BLEDevice
+        ble_device = BLEDevice(
+            address=device['address'],
+            name=device.get('name'),
+            rssi=device.get('rssi'),
+            manufacturer_data=device.get('manufacturer_data', {}),
+            service_uuids=service_uuids
+        )
+        return self.analyze_device(ble_device)
